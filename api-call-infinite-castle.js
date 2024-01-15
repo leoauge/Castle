@@ -1,99 +1,59 @@
 const apipathroot = 'https://infinite-castles.azurewebsites.net';
 const emptycheststatus = 'This chest is empty :/ Try another one!'
-const tresurelist = [];
-const roomstovisit = ['/castles/1/rooms/entry'];
+const treasureList = [];
+const roomsToVisit = new Set(['/castles/1/rooms/entry']);
+const visitedRooms = new Set();
 var explorationcount = 0
-const roomExplorationGoalNb = 200;
-const maxConcurrency = 10;
-var activeRequests = 0;
 var openedChestCount = 0;
-var discoveredChestCount = 0;
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const exploreRoom = async (roomname) => {
-    if (activeRequests >= maxConcurrency) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before retrying
-        return exploreRoom(roomname);
-    }
-    activeRequests++;
     explorationcount++;
-    console.log('Explored rooms:' + explorationcount + '/' + roomstovisit.length);    
-
-    const response = await fetch(apipathroot + roomname);
-    const data = await response.json();
-
-    // Open room chests
-    const chests = data.chests;
-    if (chests.length > 0) {
-        discoveredChestCount += chests.length;
-        chests.forEach(chest => openChest(chest));
-    }
-
-    // Add doors to the list of room to visit
-    const doors = data.rooms;
-    if (doors.length > 0) {
-        doors.forEach(door => {
-            if (!roomstovisit.includes(door) && roomstovisit.length<roomExplorationGoalNb) {
-                roomstovisit.push(door);
-                //console.log('Adding door : '+door);
-                //exploreRoom(door);
+    try {
+        const response = await fetch(apipathroot + roomname);
+        const data = await response.json();
+        data.chests.forEach(chest => openChest(chest));
+        data.rooms.forEach(door => {
+            if (!visitedRooms.has(door)) {
+                roomsToVisit.add(door);
             }
         });
-    }
-    activeRequests--;
+        visitedRooms.add(roomname);
+    } catch (error) {
+        console.error('Error exploring room:', error);
+    } 
 };
 
 const openChest = async (chest) => {
-    if (activeRequests >= maxConcurrency) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before retrying
-        return openChest(chest);
+    try {
+        const response = await fetch(apipathroot + chest);
+        const data = await response.json();
+        if (data.status && data.id) {
+            if (data.status !== emptycheststatus) {
+                treasureList.push(data.id);
+                console.log('Treasure found! ' + data.status + ' ' + data.id);
+            }
+            openedChestCount++;
+        } else {
+            console.error('Data missing in chest response:', data);
+            await delay(1000);
+            return openChest(chest);
+        }
+    } catch (error) {
+        console.error('Error opening chest:', error);
     }
-    activeRequests++;
-    openedChestCount++;
-    console.log('Opened chests: ' + openedChestCount + '/' + discoveredChestCount);
-
-    const response = await fetch(apipathroot + chest);
-    const data = await response.json();
-    const chestcontent = data.status;
-    const chestID = data.id;
-    //console.log(obj.id);
-    if (chestID == undefined) {
-        console.log(chest);
-        console.log(data);
-    }
-    if (chestcontent != emptycheststatus) {
-        tresurelist.push(chestID);
-        console.log('Treasure found! ' + chestcontent + ' ' + chestID);
-    }
-    activeRequests--;
 };
 
-var eventify = function(arr, callback) {
-    arr.push = function(e) {
-        Array.prototype.push.call(arr, e);
-        callback(arr);
-    };
+const startExploration = async () => {
+    while (roomsToVisit.size > 0) {
+        const [nextRoom] = roomsToVisit;
+        roomsToVisit.delete(nextRoom);
+        await exploreRoom(nextRoom);
+    }
+    console.log('Exploration complete. Treasures found:', treasureList);
+    console.log('Opened chests: ' + openedChestCount);
+    console.log('Visited rooms: ' + explorationcount);
 };
 
-const displayTreasure = async () => {
-    while (explorationcount < roomExplorationGoalNb || openedChestCount < discoveredChestCount) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before retrying
-        return displayTreasure();
-    }
-    console.log(tresurelist);
-}
-
-const enterCastle = async () => {
-    exploreRoom('/castles/1/rooms/entry');
-    displayTreasure();
-};
-
-eventify(roomstovisit, function(updatedArr) {
-    if (explorationcount < roomExplorationGoalNb) {
-        exploreRoom(roomstovisit[roomstovisit.length-1]);
-        //console.log('Rooms added:'+roomstovisit.length);
-    } else {
-        console.log(tresurelist);
-    }
-});
-
-enterCastle();
+startExploration();
